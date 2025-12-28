@@ -339,7 +339,7 @@ with add_tab:
                 add_note_to_db(note_text=note_text)
                 # add_note_to_db(note_text=st.session_state["note_text"])
                 st.success("Notatka zapisana 🎉")
-                # st.toast("Notatka zapisana", icon="🎉")
+                
 
 with search_tab:
     query = st.text_input("Wyszukaj notatkę")
