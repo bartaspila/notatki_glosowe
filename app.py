@@ -110,7 +110,7 @@ def debug_collections():
 def get_qdrant_client():
     return QdrantClient(
         url=st.secrets["QDRANT_URL"],
-        api_key=st.session_state["openai_api_key"]
+        api_key=st.secrets["QDRANT_API_KEY"],
         )
     
 
