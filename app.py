@@ -21,7 +21,8 @@ AUDIO_TRANSCRIBE_MODEL = "whisper-1"
 QDRANT_COLLECTION_NAME = "notes"
 
 def get_openai_client():
-    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    return OpenAI(api_key=st.session_state["openai_api_key"])
+
 # def transcribe_audio(audio_bytes):
 #     openai_client = get_openai_client()
 #     audio_file = BytesIO(audio_bytes)
@@ -109,8 +110,10 @@ def debug_collections():
 def get_qdrant_client():
     return QdrantClient(
         url=st.secrets["QDRANT_URL"],
-        api_key=st.secrets["QDRANT_API_KEY"],
-    )
+        api_key=st.session_state["openai_api_key"]
+        )
+    
+
 
 # def assure_db_collection_exists():
 #     client = get_qdrant_client()
@@ -245,6 +248,22 @@ def list_notes_from_db(query=None):
 # MAIN
 #
 st.set_page_config(page_title="Audio Notatki", layout="centered")
+
+# 🔐 Poproś użytkownika o własny OpenAI API Key
+st.title("🔐 Dostęp do OpenAI")
+
+if "openai_api_key" not in st.session_state:
+    st.session_state["openai_api_key"] = ""
+
+st.session_state["openai_api_key"] = st.text_input(
+    "Twój OpenAI API Key",
+    type="password",
+    help="Klucz jest używany tylko w tej sesji i nigdzie nie jest zapisywany",
+)
+
+if not st.session_state["openai_api_key"]:
+    st.warning("🔑 Podaj swój OpenAI API Key, aby korzystać z aplikacji")
+    st.stop()
 
 # test do wyszukania notatek
 # st.write(list_notes_from_db())
