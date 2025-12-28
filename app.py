@@ -111,7 +111,8 @@ def get_qdrant_client():
     return QdrantClient(
         url=st.secrets["QDRANT_URL"],
         api_key=st.secrets["QDRANT_API_KEY"],
-        )
+    )
+
     
 
 
@@ -216,7 +217,7 @@ def list_notes_from_db(query=None):
             collection_name=QDRANT_COLLECTION_NAME,
             limit=10,
         )
-        points = getattr(response, "points", [])  # <- scroll ma .points
+        points = getattr(response, "points", [])  # scroll ma .points
 
         for note in points:
             text = note.payload.get("text") if note.payload else ""
@@ -226,13 +227,11 @@ def list_notes_from_db(query=None):
             })
 
     else:
-        # search zwraca od razu listę punktów
         notes = client.search( # type: ignore
             collection_name=QDRANT_COLLECTION_NAME,
             query_vector=get_embedding(query),
             limit=10,
         )
-
         for note in notes:
             text = note.payload.get("text") if note.payload else ""
             result.append({
@@ -241,6 +240,7 @@ def list_notes_from_db(query=None):
             })
 
     return result
+
 
 
 
