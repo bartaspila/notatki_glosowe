@@ -100,12 +100,12 @@ def list_notes_from_db(query=None):
             collection_name=QDRANT_COLLECTION_NAME,
             limit=100
         )
-        points = getattr(response, "points", [])
+        points = getattr(response, "result", [])  # <- tu zmiana
     else:
         # Wyszukiwanie semantyczne
-        points = client.search( # type: ignore
+        points = client.search( # 
             collection_name=QDRANT_COLLECTION_NAME,
-            vector=get_embedding(query),  # <--- dla wersji 1.16.2
+            vector=get_embedding(query),# type=ignore
             limit=10,
             with_payload=True
         )
@@ -118,6 +118,7 @@ def list_notes_from_db(query=None):
         })
 
     return result
+
 
 
 #
