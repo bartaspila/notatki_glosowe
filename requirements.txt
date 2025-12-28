@@ -1,0 +1,15 @@
+io
+streamlit
+audiorecorder
+python-dotenv
+hashlib
+openai
+qdrant-client
+qdrant-client-models
+uuid
+pydub
+qdrant-client-http-exceptions
+streamlit-audiorecorder
+
+
+
