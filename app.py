@@ -1,16 +1,16 @@
 from io import BytesIO
 import streamlit as st
 from audiorecorder import audiorecorder  # type: ignore
-from dotenv import dotenv_values
+# from dotenv import dotenv_values
 from hashlib import md5
 from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, Distance, VectorParams
 import uuid
 from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.models import CollectionInfo
 
-
-env = dotenv_values(".env")
+# env = dotenv_values(".env")
 
 EMBEDDING_MODEL = "text-embedding-3-large" # 
 
@@ -21,8 +21,7 @@ AUDIO_TRANSCRIBE_MODEL = "whisper-1"
 QDRANT_COLLECTION_NAME = "notes"
 
 def get_openai_client():
-    return OpenAI(api_key=st.session_state["openai_api_key"])
-
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 # def transcribe_audio(audio_bytes):
 #     openai_client = get_openai_client()
 #     audio_file = BytesIO(audio_bytes)
@@ -65,16 +64,16 @@ def transcribe_audio(audio_bytes):
 #     if not env.get("QDRANT_API_KEY"):
 #         st.error("Brak QDRANT_API_KEY w .env")
 #         st.stop()
-@st.cache_resource
-def get_qdrant_client():
-    if not env.get("QDRANT_API_KEY"):
-        st.error("Brak QDRANT_API_KEY w .env")
-        st.stop()
+# @st.cache_resource
+# def get_qdrant_client():
+#     if not env.get("QDRANT_API_KEY"):
+#         st.error("Brak QDRANT_API_KEY w .env")
+#         st.stop()
 
-    return QdrantClient(
-        url=env["QDRANT_URL"],
-        api_key=env["QDRANT_API_KEY"],
-    )
+#     return QdrantClient(
+#         url=env["QDRANT_URL"],
+#         api_key=env["QDRANT_API_KEY"],
+#     )
 
 # print(get_qdrant_client.get_collections()) # type: ignore
 def debug_collections():
@@ -106,12 +105,30 @@ def debug_collections():
 
 #     else:
 #         print("Kolekcja już istnieje")
+@st.cache_resource
+def get_qdrant_client():
+    return QdrantClient(
+        url=st.secrets["QDRANT_URL"],
+        api_key=st.secrets["QDRANT_API_KEY"],
+    )
+
+# def assure_db_collection_exists():
+#     client = get_qdrant_client()
+#     try:
+#         client.get_collection(QDRANT_COLLECTION_NAME)
+#         print("Kolekcja już istnieje")
+#     except UnexpectedResponse:
+#         client.create_collection(
+#             collection_name=QDRANT_COLLECTION_NAME,
+#             vectors_config=VectorParams(
+#                 size=EMBEDDING_DIM,
+#                 distance=Distance.COSINE,
+#             ),
+#         )
 def assure_db_collection_exists():
     client = get_qdrant_client()
-    try:
-        client.get_collection(QDRANT_COLLECTION_NAME)
-        print("Kolekcja już istnieje")
-    except UnexpectedResponse:
+    collections = [c.name for c in client.get_collections().collections]  # <- tu jest lista CollectionInfo
+    if QDRANT_COLLECTION_NAME not in collections:
         client.create_collection(
             collection_name=QDRANT_COLLECTION_NAME,
             vectors_config=VectorParams(
@@ -119,6 +136,9 @@ def assure_db_collection_exists():
                 distance=Distance.COSINE,
             ),
         )
+        print("Utworzono kolekcję")
+    else:
+        print("Kolekcja już istnieje")
 
 def get_embedding(text):
     text = text[:8000]
@@ -185,35 +205,39 @@ def add_note_to_db(note_text):
 
 #         return result
 def list_notes_from_db(query=None):
-    qdrant_client = get_qdrant_client()
+    client = get_qdrant_client()
     result = []
 
     if not query:
-        points, _ = qdrant_client.scroll(
+        response = client.scroll(
             collection_name=QDRANT_COLLECTION_NAME,
             limit=10,
         )
+        points = response.result  # type: ignore # <- tutaj wydobywamy listę punktów 
 
         for note in points:
             result.append({
-                "text": note.payload.get("text"), # type: ignore
+                "text": note.payload.get("text"),  # type: ignore
                 "score": None,
             })
 
     else:
-        notes = qdrant_client.search(
+        response = client.search( # type: ignore
             collection_name=QDRANT_COLLECTION_NAME,
             query_vector=get_embedding(text=query),
             limit=10,
         )
+        notes = response.result  # <- wydobywamy listę wyników
 
         for note in notes:
             result.append({
-                "text": note.payload.get("text"), # type: ignore
+                "text": note.payload.get("text"),  # type: ignore
                 "score": note.score,
             })
 
     return result
+
+
 
 
 
@@ -227,18 +251,18 @@ st.set_page_config(page_title="Audio Notatki", layout="centered")
 
 
 # OpenAI API key protection
-if not st.session_state.get("openai_api_key"):
-    if "OPENAI_API_KEY" in env:
-        st.session_state["openai_api_key"] = env["OPENAI_API_KEY"]
+# if not st.session_state.get("openai_api_key"):
+#     if "OPENAI_API_KEY" in env:
+#         st.session_state["openai_api_key"] = env["OPENAI_API_KEY"]
 
-    else:
-        st.info("Dodaj swój klucz API OpenAI aby móc korzystać z tej aplikacji")
-        st.session_state["openai_api_key"] = st.text_input("Klucz API", type="password")
-        if st.session_state["openai_api_key"]:
-            st.rerun()
+#     else:
+#         st.info("Dodaj swój klucz API OpenAI aby móc korzystać z tej aplikacji")
+#         st.session_state["openai_api_key"] = st.text_input("Klucz API", type="password")
+#         if st.session_state["openai_api_key"]:
+#             st.rerun()
 
-if not st.session_state.get("openai_api_key"):
-    st.stop()
+# if not st.session_state.get("openai_api_key"):
+#     st.stop()
 
 # Session state initialization
 if "note_audio_bytes_md5" not in st.session_state:
