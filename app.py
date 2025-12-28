@@ -95,20 +95,20 @@ def list_notes_from_db(query=None):
     result = []
 
     if not query:
-        # Pobierz wszystkie punkty (do 100, dostosuj limit)
+        # Pobierz ostatnie 100 punktów
         response = client.scroll(
             collection_name=QDRANT_COLLECTION_NAME,
-            limit=100,
+            limit=100
         )
-        points = getattr(response, "points", []) or getattr(response, "result", [])
+        points = getattr(response, "points", [])
     else:
-        # Szukaj podobnych punktów semantycznie
-        response = client.search(
+        # Wyszukiwanie semantyczne
+        points = client.search( # type: ignore
             collection_name=QDRANT_COLLECTION_NAME,
-            query_vector=get_embedding(query),
+            vector=get_embedding(query),  # <--- dla wersji 1.16.2
             limit=10,
+            with_payload=True
         )
-        points = getattr(response, "result", [])
 
     for note in points:
         text = note.payload.get("text") if note.payload else ""
@@ -118,6 +118,7 @@ def list_notes_from_db(query=None):
         })
 
     return result
+
 
 #
 # MAIN
