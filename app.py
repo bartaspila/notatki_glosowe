@@ -34,27 +34,33 @@ def get_openai_client():
 # ---------------------
 def assure_db_collection_exists():
     client = get_qdrant_client()
-    collections = [c.name for c in client.get_collections().collections]
-    if QDRANT_COLLECTION_NAME not in collections:
-        client.create_collection(
-            collection_name=QDRANT_COLLECTION_NAME,
-            vectors_config=VectorParams(
-                size=EMBEDDING_DIM,
-                distance=Distance.COSINE,
-            ),
-        )
-        st.info("Utworzono kolekcję Qdrant.")
-    else:
-        st.info("Kolekcja Qdrant istnieje.")
+    try:
+        collections = [c.name for c in client.get_collections().collections]
+        if QDRANT_COLLECTION_NAME not in collections:
+            client.create_collection(
+                collection_name=QDRANT_COLLECTION_NAME,
+                vectors_config=VectorParams(
+                    size=EMBEDDING_DIM,
+                    distance=Distance.COSINE,
+                ),
+            )
+            st.info("Utworzono kolekcję Qdrant.")
+        else:
+            st.info("Kolekcja Qdrant istnieje.")
+    except Exception as e:
+        st.error(f"Błąd przy sprawdzaniu kolekcji Qdrant: {e}")
 
 # ---------------------
 # OPENAI FUNCTIONS
 # ---------------------
 def get_embedding(text):
-    text = text[:8000]
-    client = get_openai_client()
+    text = (text or "")[:8000]
+    if not text.strip():
+        st.warning("Nie można utworzyć embeddingu z pustego tekstu.")
+        return None
+    openai_client = get_openai_client()
     try:
-        result = client.embeddings.create(
+        result = openai_client.embeddings.create(
             input=[text],
             model=EMBEDDING_MODEL
         )
@@ -64,11 +70,11 @@ def get_embedding(text):
         return None
 
 def transcribe_audio(audio_bytes):
-    client = get_openai_client()
+    openai_client = get_openai_client()
     audio_file = BytesIO(audio_bytes)
     audio_file.name = "audio.mp3"
     try:
-        transcript = client.audio.transcriptions.create(
+        transcript = openai_client.audio.transcriptions.create(
             file=audio_file,
             model=AUDIO_TRANSCRIBE_MODEL
         )
@@ -86,42 +92,44 @@ def add_note_to_db(note_text):
         st.error("Nie udało się utworzyć embeddingu dla notatki.")
         return
 
-    client = get_qdrant_client()
-    client.upsert(
-        collection_name=QDRANT_COLLECTION_NAME,
-        points=[
-            PointStruct(
-                id=str(uuid.uuid4()),
-                vector=embedding,
-                payload={
-                    "text": note_text,
-                    "created_at": datetime.datetime.utcnow().isoformat()
-                }
-            )
-        ]
-    )
-    st.success("Notatka zapisana 🎉")
+    try:
+        client = get_qdrant_client()
+        client.upsert(
+            collection_name=QDRANT_COLLECTION_NAME,
+            points=[
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=embedding,
+                    payload={
+                        "text": note_text,
+                        "created_at": datetime.datetime.utcnow().isoformat()
+                    }
+                )
+            ]
+        )
+        st.success("Notatka zapisana 🎉")
+    except Exception as e:
+        st.error(f"Błąd przy zapisie notatki do Qdrant: {e}")
 
 def list_notes_from_db(query=None):
     client = get_qdrant_client()
     points = []
 
     if not query:
-        # pobierz wszystkie notatki
         try:
             response = client.scroll(
                 collection_name=QDRANT_COLLECTION_NAME,
                 limit=100,
                 with_payload=True
             )
-            points = response.result # type: ignore
+            points = response.result
         except Exception as e:
             st.error(f"Błąd pobierania notatek: {e}")
     else:
         embedding = get_embedding(query)
         if embedding:
             try:
-                points = client.search( # type: ignore
+                points = client.search(
                     collection_name=QDRANT_COLLECTION_NAME,
                     vector=embedding,
                     limit=10,
@@ -130,13 +138,16 @@ def list_notes_from_db(query=None):
             except Exception as e:
                 st.error(f"Błąd przy wyszukiwaniu: {e}")
 
-    # Zwróć listę słowników
-    result = []
+    # sortuj po dacie jeśli jest
+    notes = []
     for note in points:
         text = note.payload.get("text") if note.payload else ""
+        created_at = note.payload.get("created_at") if note.payload else ""
         score = getattr(note, "score", None)
-        result.append({"text": text, "score": score})
-    return result
+        notes.append({"text": text, "score": score, "created_at": created_at})
+
+    notes.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return notes
 
 # ---------------------
 # STREAMLIT UI
