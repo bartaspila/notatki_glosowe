@@ -6,39 +6,19 @@ from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, Distance, VectorParams
 import uuid
-from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.models import CollectionInfo
+import datetime
 
-
-EMBEDDING_MODEL = "text-embedding-3-large" 
-
+# ---------------------
+# CONFIG
+# ---------------------
+EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIM = 3072
-
 AUDIO_TRANSCRIBE_MODEL = "whisper-1"
-
 QDRANT_COLLECTION_NAME = "notes"
 
-def get_openai_client():
-    return OpenAI(api_key=st.session_state["openai_api_key"])
-
-
-def transcribe_audio(audio_bytes):
-    openai_client = get_openai_client()
-    audio_file = BytesIO(audio_bytes)
-    audio_file.name = "audio.mp3"
-
-    transcript = openai_client.audio.transcriptions.create(
-        file=audio_file,
-        model=AUDIO_TRANSCRIBE_MODEL,
-    )
-
-    return transcript.text
-
-
-
-def debug_collections():
-    st.write(get_qdrant_client().get_collections())
-
+# ---------------------
+# CLIENTS
+# ---------------------
 @st.cache_resource
 def get_qdrant_client():
     return QdrantClient(
@@ -46,10 +26,15 @@ def get_qdrant_client():
         api_key=st.secrets["QDRANT_API_KEY"],
     )
 
-    
+def get_openai_client():
+    return OpenAI(api_key=st.session_state["openai_api_key"])
+
+# ---------------------
+# DB SETUP
+# ---------------------
 def assure_db_collection_exists():
     client = get_qdrant_client()
-    collections = [c.name for c in client.get_collections().collections]  # <- tu jest lista CollectionInfo
+    collections = [c.name for c in client.get_collections().collections]
     if QDRANT_COLLECTION_NAME not in collections:
         client.create_collection(
             collection_name=QDRANT_COLLECTION_NAME,
@@ -58,79 +43,108 @@ def assure_db_collection_exists():
                 distance=Distance.COSINE,
             ),
         )
-        print("Utworzono kolekcję")
+        st.info("Utworzono kolekcję Qdrant.")
     else:
-        print("Kolekcja już istnieje")
+        st.info("Kolekcja Qdrant istnieje.")
 
+# ---------------------
+# OPENAI FUNCTIONS
+# ---------------------
 def get_embedding(text):
     text = text[:8000]
-    openai_client = get_openai_client()
-    result = openai_client.embeddings.create(
-        input=[text],
-        model=EMBEDDING_MODEL,
-        # dimensions=EMBEDDING_DIM,
-    )
-
-    return result.data[0].embedding
-
-def add_note_to_db(note_text):
-    qdrant_client = get_qdrant_client()
-    qdrant_client.upsert(
-    collection_name=QDRANT_COLLECTION_NAME,
-    points=[
-        PointStruct(
-            # id=points_count.count + 1,
-            id=str(uuid.uuid4()),
-            vector=get_embedding(text=note_text),
-            payload={
-                "text": note_text,
-            },
+    client = get_openai_client()
+    try:
+        result = client.embeddings.create(
+            input=[text],
+            model=EMBEDDING_MODEL
         )
-    ]
-    )
+        return result.data[0].embedding
+    except Exception as e:
+        st.error(f"Błąd podczas tworzenia embeddingu: {e}")
+        return None
 
+def transcribe_audio(audio_bytes):
+    client = get_openai_client()
+    audio_file = BytesIO(audio_bytes)
+    audio_file.name = "audio.mp3"
+    try:
+        transcript = client.audio.transcriptions.create(
+            file=audio_file,
+            model=AUDIO_TRANSCRIBE_MODEL
+        )
+        return transcript.text
+    except Exception as e:
+        st.error(f"Błąd transkrypcji audio: {e}")
+        return ""
+
+# ---------------------
+# QDRANT FUNCTIONS
+# ---------------------
+def add_note_to_db(note_text):
+    embedding = get_embedding(note_text)
+    if not embedding or len(embedding) != EMBEDDING_DIM:
+        st.error("Nie udało się utworzyć embeddingu dla notatki.")
+        return
+
+    client = get_qdrant_client()
+    client.upsert(
+        collection_name=QDRANT_COLLECTION_NAME,
+        points=[
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=embedding,
+                payload={
+                    "text": note_text,
+                    "created_at": datetime.datetime.utcnow().isoformat()
+                }
+            )
+        ]
+    )
+    st.success("Notatka zapisana 🎉")
 
 def list_notes_from_db(query=None):
     client = get_qdrant_client()
-    result = []
+    points = []
 
     if not query:
-        # Pobierz wszystkie notatki (limit 100)
-        response = client.scroll(
-            collection_name=QDRANT_COLLECTION_NAME,
-            limit=100,
-            with_payload=True
-        )
-        points = response.result # type: ignore
+        # pobierz wszystkie notatki
+        try:
+            response = client.scroll(
+                collection_name=QDRANT_COLLECTION_NAME,
+                limit=100,
+                with_payload=True
+            )
+            points = response.result # type: ignore
+        except Exception as e:
+            st.error(f"Błąd pobierania notatek: {e}")
     else:
-        # Wyszukiwanie semantyczne
-        points = client.search( # type: ignore
-            collection_name=QDRANT_COLLECTION_NAME,
-            vector=get_embedding(query),
-            limit=10,
-            with_payload=True
-        )
+        embedding = get_embedding(query)
+        if embedding:
+            try:
+                points = client.search( # type: ignore
+                    collection_name=QDRANT_COLLECTION_NAME,
+                    vector=embedding,
+                    limit=10,
+                    with_payload=True
+                )
+            except Exception as e:
+                st.error(f"Błąd przy wyszukiwaniu: {e}")
 
+    # Zwróć listę słowników
+    result = []
     for note in points:
         text = note.payload.get("text") if note.payload else ""
-        result.append({
-            "text": text,
-            "score": getattr(note, "score", None),
-        })
-
+        score = getattr(note, "score", None)
+        result.append({"text": text, "score": score})
     return result
 
-
-
-
-#
-# MAIN
-#
+# ---------------------
+# STREAMLIT UI
+# ---------------------
 st.set_page_config(page_title="Audio Notatki", layout="centered")
+st.title("🔐 Audio Notatki z OpenAI i Qdrant")
 
-# 🔐 Poproś użytkownika o własny OpenAI API Key
-st.title("🔐 Dostęp do OpenAI")
-
+# OpenAI API Key
 if "openai_api_key" not in st.session_state:
     st.session_state["openai_api_key"] = ""
 
@@ -144,32 +158,20 @@ if not st.session_state["openai_api_key"]:
     st.warning("🔑 Podaj swój OpenAI API Key, aby korzystać z aplikacji")
     st.stop()
 
-# test do wyszukania notatek
-# st.write(list_notes_from_db())
-
-
-# Session state initialization
-if "note_audio_bytes_md5" not in st.session_state:
-    st.session_state["note_audio_bytes_md5"] = None
-
-if "note_audio_bytes" not in st.session_state:
-    st.session_state["note_audio_bytes"] = None
-
-if "note_text" not in st.session_state:
-    st.session_state["note_text"] = ""
-
-if "note_audio_text" not in st.session_state:
-    st.session_state["note_audio_text"] = ""
+# Session state
+for key in ["note_audio_bytes_md5", "note_audio_bytes", "note_text", "note_audio_text"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if "bytes" in key else ""
 
 assure_db_collection_exists()
-st.title("Audio Notatki")
 
 add_tab, search_tab = st.tabs(["Dodaj notatkę", "Wyszukaj notatkę"])
+
+# ---------------------
+# Dodawanie notatki
+# ---------------------
 with add_tab:
-    note_audio = audiorecorder(
-        start_prompt="Nagraj notatkę",
-        stop_prompt="Zatrzymaj nagrywanie",
-    )
+    note_audio = audiorecorder("Nagraj notatkę", "Zatrzymaj nagrywanie")
     if note_audio:
         audio = BytesIO()
         note_audio.export(audio, format="mp3")
@@ -187,51 +189,25 @@ with add_tab:
                 st.session_state["note_audio_text"] = transcribe_audio(st.session_state["note_audio_bytes"])
 
         if st.session_state["note_audio_text"]:
-            st.session_state["note_text"] = st.text_area("Edytuj notatkę", value=st.session_state["note_audio_text"])
+            st.session_state["note_text"] = st.text_area(
+                "Edytuj notatkę",
+                value=st.session_state["note_audio_text"]
+            )
 
         if st.button("Zapisz notatkę", disabled=not st.session_state["note_text"]):
-            if st.session_state["note_text"]:
+            add_note_to_db(st.session_state["note_text"])
 
-                # Ograniczenie długości notatki
-                MAX_CHARS = 8000
-                note_text = st.session_state["note_text"][:MAX_CHARS]
-                # Zapisujemy ograniczoną notatkę
-                add_note_to_db(note_text=note_text)
-                # add_note_to_db(note_text=st.session_state["note_text"])
-                st.success("Notatka zapisana 🎉")
-                
+# ---------------------
+# Wyszukiwanie notatki
+# ---------------------
 with search_tab:
     query = st.text_input("Wyszukaj notatkę")
-    if st.button("Szukaj"):
-        # Sprawdzenie embeddingu
-        embedding = get_embedding(query)
-        st.write("Embedding length:", len(embedding), "Sample:", embedding[:5])
-
-        # Następnie wyszukiwanie
-        try:
-            points = get_qdrant_client().search( # type: ignore
-                collection_name=QDRANT_COLLECTION_NAME,
-                vector=embedding,
-                limit=10,
-                with_payload=True
-            )
-        except Exception as e:
-            st.error(f"Błąd przy wyszukiwaniu: {e}")
-            points = []
-
-        for note in points:
-            text = note.payload.get("text") if note.payload else ""
-            score = getattr(note, "score", None)
-            with st.container(border=True):
-                st.markdown(text)
-                if score is not None:
-                    st.markdown(f':violet[{score}]')
-
-# with search_tab:
-#     query = st.text_input("Wyszukaj notatkę")
-#     if st.button("Szukaj"):
-#         for note in list_notes_from_db(query):
-#             with st.container(border=True):
-#                 st.markdown(note["text"])
-#                 if note["score"] is not None:
-#                     st.markdown(f':violet[{note["score"]}]')
+    if st.button("Szukaj") or query == "":
+        notes = list_notes_from_db(query if query else None)
+        if not notes:
+            st.info("Brak notatek do wyświetlenia.")
+        for note in notes:
+            with st.container():
+                st.markdown(note["text"])
+                if note["score"] is not None:
+                    st.markdown(f':violet[{note["score"]}]')
