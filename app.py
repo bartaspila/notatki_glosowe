@@ -200,12 +200,38 @@ with add_tab:
                 # add_note_to_db(note_text=st.session_state["note_text"])
                 st.success("Notatka zapisana 🎉")
                 
-
 with search_tab:
     query = st.text_input("Wyszukaj notatkę")
     if st.button("Szukaj"):
-        for note in list_notes_from_db(query):
+        # Sprawdzenie embeddingu
+        embedding = get_embedding(query)
+        st.write("Embedding length:", len(embedding), "Sample:", embedding[:5])
+
+        # Następnie wyszukiwanie
+        try:
+            points = get_qdrant_client().search( # type: ignore
+                collection_name=QDRANT_COLLECTION_NAME,
+                vector=embedding,
+                limit=10,
+                with_payload=True
+            )
+        except Exception as e:
+            st.error(f"Błąd przy wyszukiwaniu: {e}")
+            points = []
+
+        for note in points:
+            text = note.payload.get("text") if note.payload else ""
+            score = getattr(note, "score", None)
             with st.container(border=True):
-                st.markdown(note["text"])
-                if note["score"] is not None:
-                    st.markdown(f':violet[{note["score"]}]')
+                st.markdown(text)
+                if score is not None:
+                    st.markdown(f':violet[{score}]')
+
+# with search_tab:
+#     query = st.text_input("Wyszukaj notatkę")
+#     if st.button("Szukaj"):
+#         for note in list_notes_from_db(query):
+#             with st.container(border=True):
+#                 st.markdown(note["text"])
+#                 if note["score"] is not None:
+#                     st.markdown(f':violet[{note["score"]}]')
