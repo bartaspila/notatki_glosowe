@@ -1,11 +1,7 @@
 streamlit
-audiorecorder
-python-dotenv
 openai
 qdrant-client
-qdrant-client-models
 pydub
-qdrant-client-http-exceptions
 streamlit-audiorecorder
 
 
