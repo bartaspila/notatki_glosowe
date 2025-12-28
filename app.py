@@ -95,22 +95,21 @@ def list_notes_from_db(query=None):
     result = []
 
     if not query:
-        # Pobierz 10 ostatnich punktów, jeśli brak zapytania
+        # Pobierz ostatnie 10 punktów
         response = client.scroll(
             collection_name=QDRANT_COLLECTION_NAME,
-            limit=10,
+            limit=10
         )
-        points = getattr(response, "points", [])  # scroll ma .points
+        points = getattr(response, "points", [])
     else:
-        # Szukaj podobnych punktów w Qdrant
-        response = client.search(  # type: ignore
+        vector = get_embedding(query)
+        response = client.search( # type: ignore
             collection_name=QDRANT_COLLECTION_NAME,
-            query_vector=get_embedding(query),
+            query_vector=vector,
             limit=10,
         )
-        points = getattr(response, "result", [])  # search ma .result
+        points = getattr(response, "result", response)  # obsługa różnych wersji SDK
 
-    # Przetwarzanie punktów na listę słowników
     for note in points:
         text = note.payload.get("text") if note.payload else ""
         result.append({
@@ -119,6 +118,7 @@ def list_notes_from_db(query=None):
         })
 
     return result
+
 
 
 #
