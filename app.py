@@ -212,22 +212,21 @@ def list_notes_from_db(query=None):
     result = []
 
     if not query:
-        # scroll zwraca obiekt z .points
         response = client.scroll(
             collection_name=QDRANT_COLLECTION_NAME,
             limit=10,
         )
-        points = getattr(response, "points", [])
+        points = getattr(response, "points", [])  # <- scroll ma .points
 
         for note in points:
-            text = getattr(note.payload, "get", lambda k, d=None: None)("text", "")
+            text = note.payload.get("text") if note.payload else ""
             result.append({
                 "text": text,
                 "score": None,
             })
 
     else:
-        # search zwraca listę punktów
+        # search zwraca od razu listę punktów
         notes = client.search( # type: ignore
             collection_name=QDRANT_COLLECTION_NAME,
             query_vector=get_embedding(query),
@@ -235,13 +234,14 @@ def list_notes_from_db(query=None):
         )
 
         for note in notes:
-            text = getattr(note.payload, "get", lambda k, d=None: None)("text", "")
+            text = note.payload.get("text") if note.payload else ""
             result.append({
                 "text": text,
                 "score": getattr(note, "score", None),
             })
 
     return result
+
 
 
 
